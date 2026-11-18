@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bmad-gitlab"
+version = "0.1.6"
+description = "Mirrors the sprint tracking of a BMAD project into GitLab issues."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/patlegu/bmad-gitlab"
+Repository = "https://github.com/patlegu/bmad-gitlab"
+Issues = "https://github.com/patlegu/bmad-gitlab/issues"
+
+[project.scripts]
+bmad-gitlab = "bmad_gitlab.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.9",
+    "types-pyyaml>=6.0.12.20261113",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bmad_gitlab = ["py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/bmad_gitlab", "skills/bmad-gitlab/scripts"]
+omit = ["skills/bmad-gitlab/scripts/bmad_gitlab/*"]  # the vendored copy of src/, checked against it by a test
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests"]
+# the copy of the engine inside the skill is generated (scripts/vendor.py) and checked against src/ by a test
+extend-exclude = ["skills/bmad-gitlab/scripts/bmad_gitlab"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C90", "SIM", "RUF", "S", "BLE", "PLR0913", "PLR0915"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 6
+max-statements = 40
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# the tests are not annotated; the package is checked strictly; the vendored copy is the package again
+exclude = ["^tests/", "^skills/bmad-gitlab/scripts/bmad_gitlab/"]

@@ -1,0 +1,4 @@
+module,skill,display-name,menu-code,description,action,args,phase,preceded-by,followed-by,required,output-location,outputs
+BMAD GitLab,bmad-gitlab,Sync the sprint to GitLab,SG,"Plan, then apply after approval, the issues, labels and board that mirror the sprint.",sync,"{-H: headless mode}",anytime,bmad-sprint-planning:sprint-planning,,false,{implementation_artifacts},GitLab issues and board
+BMAD GitLab,bmad-gitlab,Show the GitLab status,SS,"Show what differs between the sprint files and GitLab, writing nothing.",status,,anytime,,,false,,the plan in words
+BMAD GitLab,bmad-gitlab,Set up the GitLab mirror,SU,"Register the GitLab project, extra sprints, title prefixes and the sprint-planning hook.",setup,"{inline values: skip prompts with provided values}",anytime,,,false,{project-root}/_bmad/custom,config.toml and the hook file

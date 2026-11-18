@@ -1,0 +1,28 @@
+code: bgl
+name: "BMAD GitLab"
+description: "Mirrors the BMAD sprint (sprint-status.yaml and the epics file) into GitLab issues, labels and a board."
+module_version: 0.1.6
+default_selected: false
+module_greeting: >
+  The sprint now has a GitLab mirror. After sprint planning the plan is shown and nothing is written to GitLab
+  until you apply it. Run the bmad-gitlab skill with `setup` to add more sprints, title prefixes, or to change
+  the settings. Authentication stays in `glab`: run `glab auth login` if you have not.
+
+gitlab_project:
+  prompt: "Which GitLab project receives the issues (GROUP/PROJECT)?"
+  default: ""
+  required: true
+  example: "mygroup/myproject"
+
+gitlab_hostname:
+  prompt: "GitLab host (leave as is for gitlab.com)?"
+  default: "gitlab.com"
+
+auto_apply:
+  prompt: "Let the end of sprint planning create and change GitLab issues without asking?"
+  default: false
+  single-select:
+    - value: false
+      label: "No: show the plan and ask (recommended)"
+    - value: true
+      label: "Yes: apply it by itself"
