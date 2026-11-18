@@ -47,8 +47,11 @@ $ bmad-gitlab sync --project GROUP/PROJECT \
 Install the module into a BMAD project with the BMAD installer, from this repository:
 
 ```console
-$ npx bmad-method install --directory . --custom-source /path/to/bmad-gitlab --tools claude-code
+$ npx bmad-method install --directory . --custom-source https://github.com/patlegu/bmad-gitlab --tools claude-code
 ```
+
+`--custom-source` also takes the path of a local clone. The module needs [`uv`](https://docs.astral.sh/uv/) and the
+GitLab CLI [`glab`](https://gitlab.com/gitlab-org/cli), signed in to your GitLab.
 
 It asks for the GitLab project, the host and whether the hook may apply without asking, and installs the
 `bmad-gitlab` skill (the engine is carried inside it, nothing else to install). Authentication stays in `glab`
