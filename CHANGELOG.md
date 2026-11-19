@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+- `sync --apply` makes four saved views by status in the Work items tab (`BMAD: Backlog`, `In progress`, `Review`, `Done`), created or corrected by name and never duplicated. `--no-views` turns them off. A refusal of GitLab (for example the limit of five views per person) is a warning, not a failure: the issues and the board are done.
+
 ## 0.1.7
 
 - A story numbered 0 ("Story 2.0", a prerequisite of its epic) is read: the key `2-0-name` was refused as "must be 1 or more" while the epics file already accepted the heading, so a project that has one could not be mirrored at all. An epic numbered 0 is still refused.

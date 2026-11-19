@@ -821,3 +821,102 @@ class TestTheRealRunner:
         with patch("bmad_gitlab.gitlab.subprocess.run", return_value=self._done(124, "", "other")):
             reply = run_glab(["api"], None)
         assert (reply.returncode, reply.stderr) == (124, "timeout after 60 seconds")
+
+
+# ---------------------------------------------------------------------------
+# Saved views of the work items
+# ---------------------------------------------------------------------------
+
+from bmad_gitlab.gitlab import ViewSpec  # noqa: E402
+
+_BACKLOG = ViewSpec("BMAD: Backlog", "not started", {"state": "opened", "labelName": ["status:backlog"]})
+_REVIEW = ViewSpec("BMAD: Review", "waiting", {"state": "opened", "labelName": ["status:review"]})
+
+
+class TestSavedViews:
+    def test_missing_views_are_created_then_left_alone(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        assert client.ensure_saved_views([_BACKLOG, _REVIEW]) == (2, 0)
+        assert [v["name"] for v in fake._views] == ["BMAD: Backlog", "BMAD: Review"]
+        assert client.ensure_saved_views([_BACKLOG, _REVIEW]) == (0, 0)
+        assert len(fake._views) == 2
+
+    def test_a_view_whose_filter_differs_is_updated_in_place(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        client.ensure_saved_views([_BACKLOG])
+        changed = ViewSpec(_BACKLOG.name, "x", {"state": "all", "labelName": ["status:backlog"]})
+        assert client.ensure_saved_views([changed]) == (0, 1)
+        assert len(fake._views) == 1
+        assert fake._views[0]["filters"]["state"] == "all"
+
+    def test_a_view_that_is_not_ours_is_never_touched(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        client.ensure_saved_views([ViewSpec("Epic 4", "", {"state": "all"})])
+        before = [dict(v) for v in fake._views]
+        client.ensure_saved_views([_BACKLOG])
+        assert fake._views[0] == before[0]
+        assert len(fake._views) == 2
+
+    def test_the_project_path_is_sent_unquoted_and_the_host_is_passed(self):
+        fake = FakeGitLab()
+        Client("group/sub/proj", run=fake, hostname="gl.example").ensure_saved_views([_BACKLOG])
+        args = fake.calls[0]["args"]
+        assert args[:3] == ["api", "--hostname", "gl.example"]
+        assert json.loads(fake.calls[0]["stdin"])["variables"] == {"path": "group/sub/proj"}
+        create = json.loads(fake.calls[1]["stdin"])["variables"]["input"]
+        assert create["namespacePath"] == "group/sub/proj"
+        assert create["displaySettings"] == {}
+
+    def test_the_sixth_view_is_refused_with_the_reason_of_gitlab(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        specs = [ViewSpec(f"v{n}", "", {"state": "all"}) for n in range(6)]
+        with pytest.raises(GitLabError, match="only subscribe to 5"):
+            client.ensure_saved_views(specs)
+        assert len(fake._views) == 5
+
+    def test_a_graphql_error_is_named(self):
+        def run(args, stdin):
+            return Reply(0, json.dumps({"errors": [{"message": "no such field"}]}), "")
+
+        with pytest.raises(GitLabError, match="no such field"):
+            Client("g/p", run=run).ensure_saved_views([_BACKLOG])
+
+    @pytest.mark.parametrize(
+        "stdout",
+        [
+            "not json",
+            "[]",
+            '{"data": null}',
+            '{"data": {"namespace": null}}',
+            '{"data": {"namespace": {"savedViews": {"nodes": []}}}}',
+            '{"data": {"namespace": {"savedViews": {"pageInfo": {"hasNextPage": true}, "nodes": []}}}}',
+            '{"data": {"namespace": {"savedViews": {"pageInfo": {"hasNextPage": false}, "nodes": [1]}}}}',
+        ],
+    )
+    def test_an_unreadable_list_is_an_error_not_a_second_view(self, stdout):
+        with pytest.raises(GitLabError):
+            Client("g/p", run=lambda a, s: Reply(0, stdout, "")).ensure_saved_views([_BACKLOG])
+
+    def test_a_failed_glab_is_an_error(self):
+        with pytest.raises(GitLabError, match="non-zero return code 1"):
+            Client("g/p", run=lambda a, s: Reply(1, "", "boom")).ensure_saved_views([_BACKLOG])
+
+    def test_a_mutation_without_a_saved_view_is_an_error(self):
+        calls = []
+
+        def run(args, stdin):
+            calls.append(stdin)
+            if len(calls) == 1:
+                body = {
+                    "data": {"namespace": {"savedViews": {"pageInfo": {"hasNextPage": False}, "nodes": []}}}
+                }
+            else:
+                body = {"data": {"workItemSavedViewCreate": {"errors": [], "savedView": None}}}
+            return Reply(0, json.dumps(body), "")
+
+        with pytest.raises(GitLabError, match="expected an object"):
+            Client("g/p", run=run).ensure_saved_views([_BACKLOG])

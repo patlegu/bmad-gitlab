@@ -13,6 +13,16 @@ from bmad_gitlab.model import RemoteIssue
 
 
 @dataclass(frozen=True)
+class ViewSpec:
+    """A saved view of the work items: a name and the filter and the sort that make it."""
+
+    name: str
+    description: str
+    filters: Mapping[str, Any]
+    sort: str = "CREATED_ASC"
+
+
+@dataclass(frozen=True)
 class Reply:
     returncode: int
     stdout: str
@@ -69,6 +79,7 @@ class Client:
         run: Runner = run_glab,
         hostname: str | None = None,
     ) -> None:
+        self._path = project
         self._project = quote(project, safe="")
         self._run = run
         self._hostname = hostname
@@ -258,3 +269,92 @@ class Client:
             reply = self._post(f"boards/{board_id}/lists", {"label_id": label_id})
             self._object(self._check(reply, call), call, "id")
         return created or bool(missing)
+
+    # -- saved views of the work items (GraphQL: they have no REST route) ----------------------------
+
+    def _graphql(self, query: str, variables: dict[str, Any], call: str) -> dict[str, Any]:
+        """Run one GraphQL operation; its ``data``, or a ``GitLabError`` naming what GitLab said."""
+        args = ["api"]
+        if self._hostname:
+            args.extend(["--hostname", self._hostname])
+        args.extend(["graphql", "--method", "POST", "--input", "-", "-H", "Content-Type: application/json"])
+        reply = self._run(args, json.dumps({"query": query, "variables": variables}))
+        data = self._object(self._check(reply, call), call)
+        errors = data.get("errors")
+        if errors:
+            raise GitLabError(f"{call}: {_cut(json.dumps(errors))}")
+        return self._object(data.get("data"), call)
+
+    def _saved_views(self) -> dict[str, dict[str, Any]]:
+        """Name -> the view (``id`` and ``sort``) of this project; the filter is read apart."""
+        call = f"graphql savedViews of {self._path}"
+        query = (
+            "query($path: ID!){ namespace(fullPath: $path){ savedViews { pageInfo { hasNextPage } "
+            "nodes { id name sort } } } }"
+        )
+        data = self._graphql(query, {"path": self._path}, call)
+        namespace = self._object(data.get("namespace"), call)
+        views = self._object(namespace.get("savedViews"), call, "nodes", "pageInfo")
+        if self._object(views["pageInfo"], call).get("hasNextPage"):
+            raise GitLabError(f"{call}: more views than one page holds")
+        result: dict[str, dict[str, Any]] = {}
+        for node in self._list_of(views["nodes"], call):
+            view = self._object(node, call, "id", "name", "sort")
+            if not isinstance(view["id"], str) or not isinstance(view["name"], str):
+                raise GitLabError(f"{call}: id or name is not a string")
+            result[view["name"]] = view
+        return result
+
+    def _view_filters(self, view_id: str) -> object:
+        """The filter of one view: GitLab answers it for one view at a time, never for a list."""
+        call = f"graphql filters of {view_id}"
+        query = (
+            "query($path: ID!, $id: WorkItemsSavedViewsSavedViewID!){ namespace(fullPath: $path){ "
+            "savedViews(id: $id) { nodes { filters } } } }"
+        )
+        data = self._graphql(query, {"path": self._path, "id": view_id}, call)
+        namespace = self._object(data.get("namespace"), call)
+        views = self._object(namespace.get("savedViews"), call, "nodes")
+        nodes = self._list_of(views["nodes"], call)
+        if len(nodes) != 1:
+            raise GitLabError(f"{call}: expected one view, got {len(nodes)}")
+        return self._object(nodes[0], call, "filters")["filters"]
+
+    def ensure_saved_views(self, specs: Sequence[ViewSpec]) -> tuple[int, int]:
+        """Create the views that are missing and correct the ones whose filter or sort differs.
+
+        Returns (created, updated). A view that is the same is left alone, and a view that is not in
+        ``specs`` is never touched. GitLab lets a person show five views: the one past it is refused.
+        """
+        existing = self._saved_views()
+        created = updated = 0
+        for spec in specs:
+            fields: dict[str, Any] = {
+                "name": spec.name,
+                "description": spec.description,
+                "filters": dict(spec.filters),
+                "sort": spec.sort,
+            }
+            found = existing.get(spec.name)
+            if found is None:
+                self._save_view(
+                    "workItemSavedViewCreate",
+                    {"namespacePath": self._path, **fields, "displaySettings": {}},
+                )
+                created += 1
+            elif found["sort"] != spec.sort or self._view_filters(found["id"]) != fields["filters"]:
+                self._save_view("workItemSavedViewUpdate", {"id": found["id"], **fields})
+                updated += 1
+        return created, updated
+
+    def _save_view(self, mutation: str, fields: dict[str, Any]) -> None:
+        call = f"graphql {mutation} {fields['name']!r}"
+        input_type = f"{mutation[0].upper()}{mutation[1:]}Input"
+        query = (
+            f"mutation($input: {input_type}!){{ {mutation}(input: $input){{ errors savedView {{ id }} }} }}"
+        )
+        data = self._graphql(query, {"input": fields}, call)
+        payload = self._object(data.get(mutation), call, "errors")
+        if payload["errors"]:
+            raise GitLabError(f"{call}: {_cut('; '.join(str(e) for e in payload['errors']))}")
+        self._object(payload.get("savedView"), call, "id")

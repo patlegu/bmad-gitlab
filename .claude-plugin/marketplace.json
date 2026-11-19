@@ -16,7 +16,7 @@
       "name": "bgl",
       "source": "./",
       "description": "Mirrors the BMAD sprint (sprint-status.yaml and the epics file) into GitLab issues, labels and a board.",
-      "version": "0.1.7",
+      "version": "0.2.0",
       "author": {
         "name": "Patrice Le Guyader"
       },

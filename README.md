@@ -30,8 +30,18 @@ $ bmad-gitlab sync --project GROUP/PROJECT \
 | `--sprint STATUS EPICS` | A sprint pair; repeat for multiple sprints (required) |
 | `--prefix SPRINT=TEXT` | Put TEXT in front of every issue title of the sprint named SPRINT (its `project` in `sprint-status.yaml`), to tell apart sprints that share numbers, for example `--prefix 'orbit-extras=[extras]'`. Adding or removing it later renames the existing issues |
 | `--hostname HOST` | Custom GitLab hostname (default: gitlab.com) |
+| `--no-views` | With `--apply`, do not create the saved views by status (see below) |
 | `--apply` | Actually write to GitLab |
 | `--allow-problems` | Proceed even when the files disagree (a key with no section, a section with no key, two keys for one epic or story) |
+
+### Views by status
+
+With `--apply`, the command also makes four saved views in the **Work items** tab of the project, one per status:
+`BMAD: Backlog` (backlog and ready for development), `BMAD: In progress`, `BMAD: Review` and `BMAD: Done`.
+They are the same for every epic and every sprint, because the status labels are. A view that already exists with
+the same filter is left alone; one whose filter differs is corrected; a view with another name is never touched.
+GitLab shows at most five views per person: when it refuses a view, the command prints a warning and still
+exits 0, since the issues and the board are done.
 
 ### Exit codes
 

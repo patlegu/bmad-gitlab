@@ -1,7 +1,7 @@
 code: bgl
 name: "BMAD GitLab"
 description: "Mirrors the BMAD sprint (sprint-status.yaml and the epics file) into GitLab issues, labels and a board."
-module_version: 0.1.7
+module_version: 0.2.0
 default_selected: false
 module_greeting: >
   The sprint now has a GitLab mirror. After sprint planning the plan is shown and nothing is written to GitLab

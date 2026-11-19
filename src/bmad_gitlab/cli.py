@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from typing import TextIO
 
 from bmad_gitlab.apply import apply
-from bmad_gitlab.gitlab import Client, GitLabError, Runner, run_glab
+from bmad_gitlab.gitlab import Client, GitLabError, Runner, ViewSpec, run_glab
 from bmad_gitlab.model import (
     Item,
     RemoteIssue,
@@ -25,6 +25,31 @@ from bmad_gitlab.report import render_applied, render_plan
 
 BOARD_NAME = "BMAD Sprint Board"
 BOARD_STATUS_LABELS = ("status:backlog", "status:ready-for-dev", "status:in-progress", "status:review")
+
+# One saved view of the work items per status, for the whole project: the status labels are the same for
+# every epic, so four views cover them all (GitLab shows five per person).
+STATUS_VIEWS = (
+    ViewSpec(
+        "BMAD: Backlog",
+        "Stories not started: backlog and ready for development.",
+        {"state": "opened", "or": {"labelNames": ["status:backlog", "status:ready-for-dev"]}},
+    ),
+    ViewSpec(
+        "BMAD: In progress",
+        "Stories being built.",
+        {"state": "opened", "labelName": ["status:in-progress"]},
+    ),
+    ViewSpec(
+        "BMAD: Review",
+        "Stories built and waiting for review.",
+        {"state": "opened", "labelName": ["status:review"]},
+    ),
+    ViewSpec(
+        "BMAD: Done",
+        "Stories and epics that are done.",
+        {"state": "all", "labelName": ["status:done"]},
+    ),
+)
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -77,6 +102,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "'orbit-extras=[extras]'.",
     )
     sync.add_argument("--hostname", default=None, help="GitLab host, when it is not gitlab.com.")
+    sync.add_argument("--no-views", action="store_true", help="Do not create the saved views by status.")
     sync.add_argument("--apply", action="store_true", help="Write to GitLab (the default is a dry run).")
     sync.add_argument("--allow-problems", action="store_true", help="Go on when the files show problems.")
     return parser
@@ -110,6 +136,8 @@ def _sync(args: argparse.Namespace, run: Runner, out: TextIO, err: TextIO) -> in
     except GitLabError as exc:
         print(f"error: {exc}", file=err)
         return EXIT_GITLAB
+    if not args.no_views:
+        _apply_views(client, out, err)
     return EXIT_OK
 
 
@@ -184,3 +212,19 @@ def _apply_and_board(plans: Sequence[Plan], client: Client, out: TextIO) -> None
     if client.ensure_board(BOARD_NAME, BOARD_STATUS_LABELS):
         extra = f" ({len(missing)} status labels created)" if missing else ""
         print(f"board created{extra}", file=out)
+
+
+def _apply_views(client: Client, out: TextIO, err: TextIO) -> None:
+    """Create or correct the views by status. A refusal is a warning: the issues and the board are done.
+
+    The views need a GitLab that has them, and room for them under the five that a person can show.
+    """
+    try:
+        created, updated = client.ensure_saved_views(STATUS_VIEWS)
+    except GitLabError as exc:
+        print(f"warning: the views by status were not made: {exc}", file=err)
+        return
+    print(
+        f"views: {created} created, {updated} updated, {len(STATUS_VIEWS) - created - updated} unchanged",
+        file=out,
+    )

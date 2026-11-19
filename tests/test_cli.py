@@ -129,6 +129,15 @@ class TestDryRun:
 # ---------------------------------------------------------------------------
 
 
+def _writes(fake):
+    """The calls that write: a GraphQL query is a POST that only reads."""
+    return sum(
+        1
+        for c in fake.calls
+        if "--method" in c["args"] and not ("graphql" in c["args"] and "mutation" not in c["stdin"])
+    )
+
+
 class TestApply:
     def test_apply_creates_labels_and_issues(self):
         """--apply creates labels and issues."""
@@ -151,7 +160,7 @@ class TestApply:
         assert code1 == 0
 
         # Count write calls after first apply
-        write_count_1 = sum(1 for c in fake.calls if c["args"][0] == "api" and "--method" in c["args"])
+        write_count_1 = _writes(fake)
 
         # Second apply
         code2, out2, _err2, _fake2 = _run(
@@ -163,7 +172,7 @@ class TestApply:
         assert "nothing to do" in out2
 
         # No additional write calls
-        write_count_2 = sum(1 for c in fake.calls if c["args"][0] == "api" and "--method" in c["args"])
+        write_count_2 = _writes(fake)
         assert write_count_2 == write_count_1
 
 
@@ -453,7 +462,7 @@ class TestSecondApply:
         assert code1 == 0
 
         # Count write calls
-        write_calls_before = sum(1 for c in fake.calls if c["args"][0] == "api" and "--method" in c["args"])
+        write_calls_before = _writes(fake)
 
         # Second apply on the SAME fake (same state)
         code2, out2, _err2, _ = _run(
@@ -465,7 +474,7 @@ class TestSecondApply:
         assert "nothing to do" in out2
 
         # No additional write calls
-        write_calls_after = sum(1 for c in fake.calls if c["args"][0] == "api" and "--method" in c["args"])
+        write_calls_after = _writes(fake)
         assert write_calls_after == write_calls_before
 
 
@@ -776,3 +785,60 @@ class TestPrefixOption:
         assert code == 0
         extras = [i["title"] for i in fake._issues if "sprint=orbit-extras" in i["description"]]
         assert all(t.startswith("[extras] ") and not t.startswith("[extras]  ") for t in extras)
+
+
+# ---------------------------------------------------------------------------
+# The views by status
+# ---------------------------------------------------------------------------
+
+
+class TestStatusViews:
+    def test_apply_makes_the_four_views_and_says_so(self):
+        code, out, err, fake = _run(["--sprint", _pf_status(), _pf_epics()], apply_flag=True)
+        assert code == 0
+        assert err == ""
+        assert [v["name"] for v in fake._views] == [
+            "BMAD: Backlog",
+            "BMAD: In progress",
+            "BMAD: Review",
+            "BMAD: Done",
+        ]
+        assert "views: 4 created, 0 updated, 0 unchanged" in out
+
+    def test_the_second_apply_leaves_the_views_alone(self):
+        _, _, _, fake = _run(["--sprint", _pf_status(), _pf_epics()], apply_flag=True)
+        views = [dict(v) for v in fake._views]
+        _, out, _, _ = _run(["--sprint", _pf_status(), _pf_epics()], fake=fake, apply_flag=True)
+        assert "views: 0 created, 0 updated, 4 unchanged" in out
+        assert fake._views == views
+
+    def test_no_views_flag(self):
+        code, out, _, fake = _run(["--sprint", _pf_status(), _pf_epics(), "--no-views"], apply_flag=True)
+        assert code == 0
+        assert fake._views == []
+        assert "views:" not in out
+
+    def test_a_dry_run_makes_no_view_and_does_not_ask_for_them(self):
+        _, _, _, fake = _run(["--sprint", _pf_status(), _pf_epics()])
+        assert fake._views == []
+        assert not any("graphql" in c["args"] for c in fake.calls)
+
+    def test_a_refusal_of_gitlab_is_a_warning_and_the_sync_is_done(self):
+        fake = FakeGitLab()
+        fake.view_limit = 3  # the person already shows other views
+        code, out, err, _ = _run(["--sprint", _pf_status(), _pf_epics()], fake=fake, apply_flag=True)
+        assert code == 0
+        assert "warning: the views by status were not made" in err
+        assert "only subscribe to 5" in err
+        assert "board created" in out
+        assert len(fake._views) == 3
+
+    def test_the_status_filters_match_the_labels_of_the_board_and_of_the_plan(self):
+        from bmad_gitlab.cli import BOARD_STATUS_LABELS, STATUS_VIEWS
+
+        labels = set()
+        for view in STATUS_VIEWS:
+            labels.update(view.filters.get("labelName", []))
+            labels.update(view.filters.get("or", {}).get("labelNames", []))
+        assert set(BOARD_STATUS_LABELS) <= labels
+        assert labels - set(BOARD_STATUS_LABELS) == {"status:done"}

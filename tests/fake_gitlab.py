@@ -30,6 +30,10 @@ class FakeGitLab:
     _boards_lists: dict[int, list[dict]] = field(default_factory=dict, init=False)
     _next_list_id: int = field(default=1, init=False)
 
+    _views: list[dict] = field(default_factory=list, init=False)
+    _next_view_id: int = field(default=1, init=False)
+    view_limit: int = field(default=5, init=False)  # GitLab shows five views per person
+
     calls: list[dict] = field(default_factory=list, init=False)
 
     # knobs for injecting failures
@@ -68,6 +72,8 @@ class FakeGitLab:
             return self._handle_project(method, path, params, stdin)
         if path.startswith("boards/"):
             return self._handle_boards(method, path, params, stdin)
+        if path == "graphql" and method == "POST":
+            return self._handle_graphql(stdin)
         return Reply(returncode=1, stdout='{"message":"404 Not Found"}', stderr="not found")
 
     # -- internal helpers --------------------------------------------------
@@ -76,8 +82,9 @@ class FakeGitLab:
     def _parse_args(args: Sequence[str]):
         """Return (method, path, params) from glab args."""
         method = "GET"
+        positional: list[str] = []
         i = 1
-        while i < len(args):
+        while i < len(args):  # cobra takes flags before and after the path
             if args[i] == "--hostname" and i + 1 < len(args):
                 i += 2
             elif args[i] == "--method" and i + 1 < len(args):
@@ -86,8 +93,8 @@ class FakeGitLab:
             elif args[i] in ("--input", "-H"):
                 i += 2
             else:
-                break
-        positional = list(args[i:])
+                positional.append(args[i])
+                i += 1
         if len(positional) != 1:  # glab api takes exactly one path; query parameters belong in it
             raise _GlabUsageError(f"accepts 1 arg(s), received {len(positional)}")
         path, _, query = positional[0].partition("?")
@@ -302,3 +309,50 @@ class FakeGitLab:
         entry = {"id": lid, "label_id": label_id, "position": len(lists)}
         lists.append(entry)
         return Reply(returncode=0, stdout=json.dumps(self._list_object(entry)), stderr="")
+
+    # -- saved views (GraphQL) -------------------------------------------
+
+    def _handle_graphql(self, stdin: str | None) -> Reply:
+        body = self._load_json(stdin)
+        if body is None or "query" not in body:
+            return self._graphql({"errors": [{"message": "Unexpected end of document"}]})
+        query, variables = body["query"], body.get("variables", {})
+        if "savedViews" in query:
+            if "$id" in query:  # one view by its id
+                nodes = [dict(v) for v in self._views if v["id"] == variables["id"]]
+            else:
+                nodes = [dict(view) for view in self._views]
+            if "filters" in query and len(nodes) > 1:  # GitLab reads the filters of one view at a time
+                message = '"filters" field can be requested only for 1 WorkItemSavedViewType(s) at a time.'
+                return self._graphql({"errors": [{"message": message}]})
+            if "filters" not in query:
+                for node in nodes:
+                    node.pop("filters")
+            data = {"namespace": {"savedViews": {"pageInfo": {"hasNextPage": False}, "nodes": nodes}}}
+            return self._graphql({"data": data})
+        if "workItemSavedViewCreate" in query:
+            return self._graphql({"data": {"workItemSavedViewCreate": self._create_view(variables["input"])}})
+        if "workItemSavedViewUpdate" in query:
+            return self._graphql({"data": {"workItemSavedViewUpdate": self._update_view(variables["input"])}})
+        return self._graphql({"errors": [{"message": "unknown operation"}]})
+
+    @staticmethod
+    def _graphql(payload: dict) -> Reply:
+        return Reply(returncode=0, stdout=json.dumps(payload), stderr="")
+
+    def _create_view(self, fields: dict) -> dict:
+        if len(self._views) >= self.view_limit:
+            return {"errors": ["You can only subscribe to 5 views"], "savedView": None}
+        view_id = f"gid://gitlab/WorkItems::SavedViews::SavedView/{self._next_view_id}"
+        self._next_view_id += 1
+        self._views.append(
+            {"id": view_id, "name": fields["name"], "filters": fields["filters"], "sort": fields["sort"]}
+        )
+        return {"errors": [], "savedView": {"id": view_id}}
+
+    def _update_view(self, fields: dict) -> dict:
+        for view in self._views:
+            if view["id"] == fields["id"]:
+                view.update(name=fields["name"], filters=fields["filters"], sort=fields["sort"])
+                return {"errors": [], "savedView": {"id": view["id"]}}
+        return {"errors": ["Saved view not found"], "savedView": None}
