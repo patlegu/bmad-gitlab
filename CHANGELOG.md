@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- A story numbered 0 ("Story 2.0", a prerequisite of its epic) is read: the key `2-0-name` was refused as "must be 1 or more" while the epics file already accepted the heading, so a project that has one could not be mirrored at all. An epic numbered 0 is still refused.
+
 ## 0.1.6
 
 First public release.

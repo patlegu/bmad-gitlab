@@ -194,10 +194,8 @@ def _parse_key_numbers(key: str, kind: Kind) -> tuple[int, int | None]:
     if kind == "retrospective":
         return (_number(key.removeprefix("epic-").removesuffix("-retrospective"), key), None)
     parts = key.split("-", 2)
-    story = _number(parts[1], key)
-    if story < 1:
-        raise SprintError(f"the story number of key {key!r} must be 1 or more")
-    return (_number(parts[0], key), story)
+    # a story may be numbered 0: a prerequisite of its epic ("Story 2.0")
+    return (_number(parts[0], key), _number(parts[1], key))
 
 
 def _valid_statuses(kind: Kind) -> tuple[str, ...]:

@@ -468,7 +468,15 @@ class TestEpicNumbers:
 
 class TestKeysAndHeadings:
     @pytest.mark.parametrize(
-        "key", ["epic-+1", "epic-1_0", "epic-٣", "1-0-first", "epic-1-retrospective-retrospective"]
+        "key",
+        [
+            "epic-+1",
+            "epic-1_0",
+            "epic-٣",
+            "1-+0-first",
+            "1-\u0660-first",
+            "epic-1-retrospective-retrospective",
+        ],
     )
     def test_a_key_that_int_would_take_but_is_not_a_number_is_refused(self, key):
         with pytest.raises(SprintError):
@@ -563,3 +571,41 @@ def test_the_data_classes_are_frozen():
     ):
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(instance, field, None)
+
+
+class TestStoryZero:
+    """A story numbered 0 is a prerequisite of its epic ("Story 2.0"): hephaistos has one."""
+
+    STATUS = "project: p\ndevelopment_status:\n  epic-2: in-progress\n  2-0-lock: done\n  2-1-agent: review\n"
+    EPICS = (
+        "## Epic 2: Agents\n\n### Story 2.0: Lock and deadlines\n\nThe lock.\n\n"
+        "### Story 2.1: Agent\n\nThe agent.\n"
+    )
+
+    def test_a_key_with_story_number_zero_is_read(self):
+        _, entries = read_status(self.STATUS)
+        zero = next(e for e in entries if e.key == "2-0-lock")
+        assert (zero.kind, zero.epic, zero.story) == ("story", 2, 0)
+
+    def test_a_heading_of_story_zero_is_read(self):
+        assert read_epics(self.EPICS).story_titles == {(2, 0): "Lock and deadlines", (2, 1): "Agent"}
+
+    def test_the_story_zero_gets_its_title_and_its_text_and_there_is_no_problem(self):
+        _, entries = read_status(self.STATUS)
+        items, problems = build_items(entries, read_epics(self.EPICS))
+        assert problems == ()
+        zero = next(i for i in items if i.key == "2-0-lock")
+        assert (zero.story, zero.title, zero.body) == (0, "Lock and deadlines", "The lock.")
+
+    def test_a_story_zero_without_its_section_is_a_problem_like_any_other(self):
+        _, entries = read_status(self.STATUS)
+        _, problems = build_items(entries, read_epics("## Epic 2: Agents\n\n### Story 2.1: Agent\n\nx\n"))
+        assert problems == ("story 2-0-lock has no section in epics.md",)
+
+    def test_story_zero_and_story_one_are_two_stories(self):
+        _, entries = read_status(self.STATUS)
+        assert [e.story for e in entries if e.story is not None] == [0, 1]
+
+    def test_epic_zero_is_still_refused(self):
+        with pytest.raises(SprintError, match="must be 1 or more"):
+            read_status("project: p\ndevelopment_status:\n  0-0-first: backlog\n")
