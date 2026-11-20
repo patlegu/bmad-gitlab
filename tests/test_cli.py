@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pytest
 
 from bmad_gitlab.cli import main
+from bmad_gitlab.gitlab import Reply
 from fake_gitlab import FakeGitLab
 
 # ---------------------------------------------------------------------------
@@ -842,3 +843,70 @@ class TestStatusViews:
             labels.update(view.filters.get("or", {}).get("labelNames", []))
         assert set(BOARD_STATUS_LABELS) <= labels
         assert labels - set(BOARD_STATUS_LABELS) == {"status:done"}
+
+
+# ---------------------------------------------------------------------------
+# The milestones and the checklists
+# ---------------------------------------------------------------------------
+
+
+class TestStructure:
+    def test_apply_makes_a_milestone_for_each_epic_and_a_checklist_in_its_issue(self):
+        code, out, err, fake = _run(["--sprint", _pf_status(), _pf_epics()], apply_flag=True)
+        assert code == 0 and err == ""
+        assert fake._milestones, "no milestone was made"
+        assert "milestones:" in out
+        epic_issues = [i for i in fake._issues if "type:epic" in i["labels"]]
+        assert any("### Stories" in i["description"] for i in epic_issues)
+        stories = [i for i in fake._issues if "type:story" in i["labels"]]
+        assert all(i["milestone"] is not None for i in stories)
+
+    def test_the_second_apply_changes_nothing(self):
+        _, _, _, fake = _run(["--sprint", _pf_status(), _pf_epics()], apply_flag=True)
+        before = (
+            [dict(i) for i in fake._issues],
+            [dict(m) for m in fake._milestones],
+        )
+        _, out, _, _ = _run(["--sprint", _pf_status(), _pf_epics()], fake=fake, apply_flag=True)
+        assert "structure: nothing to do" in out
+        assert ([dict(i) for i in fake._issues], [dict(m) for m in fake._milestones]) == before
+
+    def test_the_flags_turn_each_part_off(self):
+        _, _, _, no_milestones = _run(
+            ["--sprint", _pf_status(), _pf_epics(), "--no-milestones"], apply_flag=True
+        )
+        assert no_milestones._milestones == []
+        assert any("### Stories" in i["description"] for i in no_milestones._issues)
+        _, _, _, no_checklists = _run(
+            ["--sprint", _pf_status(), _pf_epics(), "--no-checklists"], apply_flag=True
+        )
+        assert no_checklists._milestones
+        assert not any("### Stories" in i["description"] for i in no_checklists._issues)
+        _, out, _, neither = _run(
+            ["--sprint", _pf_status(), _pf_epics(), "--no-milestones", "--no-checklists"], apply_flag=True
+        )
+        assert "milestones:" not in out and neither._milestones == []
+
+    def test_a_dry_run_after_an_apply_names_what_a_status_change_would_do(self):
+        _, _, _, fake = _run(["--sprint", _pf_status(), _pf_epics()], apply_flag=True)
+        assert fake._milestones
+        code, out, _, _ = _run(["--sprint", _pf_status(), _pf_epics()], fake=fake)
+        assert code == 0 and "structure: nothing to do" in out
+
+    def test_a_dry_run_writes_no_milestone(self):
+        _, _, _, fake = _run(["--sprint", _pf_status(), _pf_epics()])
+        assert fake._milestones == []
+
+    def test_a_refusal_of_gitlab_is_a_warning_and_the_sync_is_done(self):
+        class NoMilestones(FakeGitLab):
+            def __call__(self, args, stdin):
+                if "milestones" in args[-1]:
+                    return Reply(returncode=1, stdout="", stderr="403 Forbidden")
+                return super().__call__(args, stdin)
+
+        code, out, err, _ = _run(
+            ["--sprint", _pf_status(), _pf_epics()], fake=NoMilestones(), apply_flag=True
+        )
+        assert code == 0
+        assert "warning: the milestones and checklists were not made" in err
+        assert "board created" in out

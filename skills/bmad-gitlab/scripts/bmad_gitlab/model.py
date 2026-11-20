@@ -60,6 +60,16 @@ class RemoteIssue:
     description: str
     labels: tuple[str, ...]
     state: Literal["opened", "closed"]
+    milestone: str | None = None  # the title of its milestone
+
+
+@dataclass(frozen=True)
+class RemoteMilestone:
+    """A milestone of the project, as the caller read it."""
+
+    id: int
+    title: str
+    state: Literal["active", "closed"]
 
 
 @dataclass(frozen=True)

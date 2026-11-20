@@ -147,10 +147,12 @@ def source_hash(item: Item, prefix: str = "") -> str:
     return hashlib.sha256(f"{issue_title(item, prefix)}\n{item.body}".encode()).hexdigest()[:12]
 
 
-def render_description(sprint: str, item: Item, prefix: str = "") -> str:
-    """The body of the item and the hidden marker that ties the issue to its BMAD key."""
+def render_description(sprint: str, item: Item, prefix: str = "", checklist: str = "") -> str:
+    """The body of the item, its ``checklist`` of stories when it has one, and the hidden marker that
+    ties the issue to its BMAD key (the marker stays last: ``parse_marker`` reads the last one)."""
     footer = f"---\n<!-- bmad:v1 sprint={sprint} key={item.key} hash={source_hash(item, prefix)} -->"
-    return f"{item.body}\n\n{footer}" if item.body else footer
+    text = "\n\n".join(part for part in (item.body, checklist) if part)
+    return f"{text}\n\n{footer}" if text else footer
 
 
 def parse_marker(description: str) -> Marker | None:
@@ -171,7 +173,7 @@ def _label_actions(sprint: str, items: tuple[Item, ...], labels: frozenset[str])
     return [CreateLabel(name, label_color(name)) for name in missing]
 
 
-def _issues_by_key(sprint: str, issues: tuple[RemoteIssue, ...]) -> dict[str, list[RemoteIssue]]:
+def issues_by_key(sprint: str, issues: tuple[RemoteIssue, ...]) -> dict[str, list[RemoteIssue]]:
     """The issues of this sprint (by their marker) grouped by BMAD key; others are not ours."""
     grouped: dict[str, list[RemoteIssue]] = {}
     for issue in issues:
@@ -239,7 +241,7 @@ def plan(
     ``prefix`` goes in front of every title of the sprint, to tell apart two sprints that share numbers.
     """
     wanted = tuple(item for item in items if item.kind != "retrospective")
-    grouped = _issues_by_key(sprint, issues)
+    grouped = issues_by_key(sprint, issues)
     actions = _label_actions(sprint, wanted, labels)
     warnings: list[str] = []
     for item in wanted:

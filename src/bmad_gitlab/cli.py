@@ -22,6 +22,13 @@ from bmad_gitlab.model import (
 from bmad_gitlab.plan import CreateLabel, Plan, label_color
 from bmad_gitlab.plan import plan as make_plan
 from bmad_gitlab.report import render_applied, render_plan
+from bmad_gitlab.structure import (
+    StructureOptions,
+    apply_structure,
+    plan_structure,
+    render_structure_applied,
+    render_structure_plan,
+)
 
 BOARD_NAME = "BMAD Sprint Board"
 BOARD_STATUS_LABELS = ("status:backlog", "status:ready-for-dev", "status:in-progress", "status:review")
@@ -102,6 +109,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "'orbit-extras=[extras]'.",
     )
     sync.add_argument("--hostname", default=None, help="GitLab host, when it is not gitlab.com.")
+    sync.add_argument(
+        "--no-milestones", action="store_true", help="Do not make a milestone for each epic and fill it."
+    )
+    sync.add_argument(
+        "--no-checklists", action="store_true", help="Do not list the stories in the issue of each epic."
+    )
     sync.add_argument("--no-views", action="store_true", help="Do not create the saved views by status.")
     sync.add_argument("--apply", action="store_true", help="Write to GitLab (the default is a dry run).")
     sync.add_argument("--allow-problems", action="store_true", help="Go on when the files show problems.")
@@ -130,6 +143,7 @@ def _sync(args: argparse.Namespace, run: Runner, out: TextIO, err: TextIO) -> in
         return EXIT_GITLAB
     plans = _plan_sprints(sprints, frozenset(labels), issues, out)
     if not args.apply:
+        _structure(args, client, sprints, out, err, apply_changes=False)
         return EXIT_OK
     try:
         _apply_and_board(plans, client, out)
@@ -138,6 +152,7 @@ def _sync(args: argparse.Namespace, run: Runner, out: TextIO, err: TextIO) -> in
         return EXIT_GITLAB
     if not args.no_views:
         _apply_views(client, out, err)
+    _structure(args, client, sprints, out, err, apply_changes=True)
     return EXIT_OK
 
 
@@ -228,3 +243,39 @@ def _apply_views(client: Client, out: TextIO, err: TextIO) -> None:
         f"views: {created} created, {updated} updated, {len(STATUS_VIEWS) - created - updated} unchanged",
         file=out,
     )
+
+
+def _structure(
+    args: argparse.Namespace,
+    client: Client,
+    sprints: Sequence[_Sprint],
+    out: TextIO,
+    err: TextIO,
+    *,
+    apply_changes: bool,
+) -> None:
+    """Plan (or make) the milestone and the checklist of each epic from what GitLab holds now.
+
+    A refusal is a warning, as for the views: the issues and the board are done, and a project may
+    have no milestones.
+    """
+    if args.no_milestones and args.no_checklists:
+        return
+    try:
+        issues = client.issues()
+        milestones = () if args.no_milestones else client.milestones()
+        for sprint in sprints:
+            actions = plan_structure(
+                sprint.project,
+                sprint.items,
+                issues,
+                milestones,
+                sprint.prefix,
+                StructureOptions(milestones=not args.no_milestones, checklists=not args.no_checklists),
+            )
+            if apply_changes:
+                print(render_structure_applied(apply_structure(actions, client)), file=out)
+            else:
+                print(render_structure_plan(actions), file=out)
+    except GitLabError as exc:
+        print(f"warning: the milestones and checklists were not made: {exc}", file=err)

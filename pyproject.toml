@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bmad-gitlab"
-version = "0.2.0"
+version = "0.3.0"
 description = "Mirrors the sprint tracking of a BMAD project into GitLab issues."
 readme = "README.md"
 license = "MIT"

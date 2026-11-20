@@ -920,3 +920,68 @@ class TestSavedViews:
 
         with pytest.raises(GitLabError, match="expected an object"):
             Client("g/p", run=run).ensure_saved_views([_BACKLOG])
+
+
+# ---------------------------------------------------------------------------
+# Milestones
+# ---------------------------------------------------------------------------
+
+
+class TestMilestones:
+    def test_a_milestone_is_created_listed_closed_and_opened_again(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        milestone_id = client.create_milestone("Epic 1: A", "d")
+        assert [(m.id, m.title, m.state) for m in client.milestones()] == [
+            (milestone_id, "Epic 1: A", "active")
+        ]
+        client.update_milestone(milestone_id, "close")
+        assert client.milestones()[0].state == "closed"
+        client.update_milestone(milestone_id, "activate")
+        assert client.milestones()[0].state == "active"
+
+    def test_an_issue_is_put_in_a_milestone_and_its_title_is_read_back(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        milestone_id = client.create_milestone("Epic 1: A", "d")
+        iid = client.create_issue("t", "d", [])
+        assert client.issues()[0].milestone is None
+        client.set_milestone(iid, milestone_id)
+        assert client.issues()[0].milestone == "Epic 1: A"
+
+    def test_every_page_of_milestones_is_read(self):
+        fake = FakeGitLab()
+        client = Client("g/p", run=fake)
+        for n in range(120):
+            client.create_milestone(f"m{n}", "")
+        assert len(client.milestones()) == 120
+
+    def test_an_invalid_state_event_is_refused_before_any_call(self):
+        fake = FakeGitLab()
+        with pytest.raises(ValueError, match="state_event"):
+            Client("g/p", run=fake).update_milestone(1, "delete")
+        assert fake.calls == []
+
+    @pytest.mark.parametrize(
+        "stdout",
+        [
+            "[1]",
+            '[{"id": 1, "title": 3, "state": "active"}]',
+            '[{"id": 1, "title": "a", "state": "open"}]',
+            '[{"id": "1", "title": "a", "state": "active"}]',
+            '[{"title": "a", "state": "active"}]',
+            "{}",
+        ],
+    )
+    def test_an_unreadable_list_of_milestones_is_an_error(self, stdout):
+        with pytest.raises(GitLabError):
+            Client("g/p", run=lambda a, s: Reply(0, stdout, "")).milestones()
+
+    def test_a_milestone_title_that_is_not_a_string_in_an_issue_is_an_error(self):
+        issue = '[{"iid": 1, "title": "t", "labels": [], "state": "opened", "milestone": {"title": 3}}]'
+        with pytest.raises(GitLabError, match="milestone title"):
+            Client("g/p", run=lambda a, s: Reply(0, issue, "")).issues()
+
+    def test_an_issue_without_a_milestone_object_has_none(self):
+        issue = '[{"iid": 1, "title": "t", "labels": [], "state": "opened", "milestone": null}]'
+        assert Client("g/p", run=lambda a, s: Reply(0, issue, "")).issues()[0].milestone is None

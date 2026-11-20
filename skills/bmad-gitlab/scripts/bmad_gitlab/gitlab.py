@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
-from bmad_gitlab.model import RemoteIssue
+from bmad_gitlab.model import RemoteIssue, RemoteMilestone
 
 
 @dataclass(frozen=True)
@@ -158,12 +158,50 @@ class Client:
         description = item.get("description")
         if description is not None and not isinstance(description, str):
             raise GitLabError(f"{call}: description is not a string")
+        milestone = item.get("milestone")
+        milestone_title = milestone.get("title") if isinstance(milestone, dict) else None
+        if milestone_title is not None and not isinstance(milestone_title, str):
+            raise GitLabError(f"{call}: milestone title is not a string")
         return RemoteIssue(
             iid=self._int_field(item, "iid", call),
             title=str(item["title"]),
             description=description or "",
             labels=tuple(str(label) for label in raw_labels),
             state=state,
+            milestone=milestone_title,
+        )
+
+    def milestones(self) -> tuple[RemoteMilestone, ...]:
+        """Every milestone of the project, active and closed, every page."""
+        result: list[RemoteMilestone] = []
+        for call, data in self._pages("milestones", "milestones"):
+            for item in data:
+                found = self._object(item, call, "id", "title", "state")
+                if not isinstance(found["title"], str) or found["state"] not in ("active", "closed"):
+                    raise GitLabError(f"{call}: title or state is not valid")
+                result.append(
+                    RemoteMilestone(self._int_field(found, "id", call), found["title"], found["state"])
+                )
+        return tuple(result)
+
+    def create_milestone(self, title: str, description: str) -> int:
+        """Create a milestone; its id."""
+        call = f"POST projects/{self._project}/milestones"
+        reply = self._post("milestones", {"title": title, "description": description})
+        return self._integer(self._check(reply, call), call, "id")
+
+    def set_milestone(self, iid: int, milestone_id: int) -> None:
+        """Put issue ``iid`` in the milestone ``milestone_id``."""
+        call = f"PUT projects/{self._project}/issues/{iid}"
+        self._object(self._check(self._put(f"issues/{iid}", {"milestone_id": milestone_id}), call), call)
+
+    def update_milestone(self, milestone_id: int, state_event: str) -> None:
+        """Close (``close``) or open again (``activate``) a milestone."""
+        if state_event not in ("close", "activate"):
+            raise ValueError(f"invalid state_event {state_event!r}")
+        call = f"PUT projects/{self._project}/milestones/{milestone_id}"
+        self._object(
+            self._check(self._put(f"milestones/{milestone_id}", {"state_event": state_event}), call), call
         )
 
     def create_label(self, name: str, color: str) -> int:

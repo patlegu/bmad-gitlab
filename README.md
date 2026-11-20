@@ -30,9 +30,26 @@ $ bmad-gitlab sync --project GROUP/PROJECT \
 | `--sprint STATUS EPICS` | A sprint pair; repeat for multiple sprints (required) |
 | `--prefix SPRINT=TEXT` | Put TEXT in front of every issue title of the sprint named SPRINT (its `project` in `sprint-status.yaml`), to tell apart sprints that share numbers, for example `--prefix 'orbit-extras=[extras]'`. Adding or removing it later renames the existing issues |
 | `--hostname HOST` | Custom GitLab hostname (default: gitlab.com) |
+| `--no-milestones` | With `--apply`, do not make a milestone for each epic (see below) |
+| `--no-checklists` | With `--apply`, do not list the stories in the issue of each epic (see below) |
 | `--no-views` | With `--apply`, do not create the saved views by status (see below) |
 | `--apply` | Actually write to GitLab |
 | `--allow-problems` | Proceed even when the files disagree (a key with no section, a section with no key, two keys for one epic or story) |
+
+### Progress by epic (a milestone and a checklist)
+
+GitLab Premium has epics with a progress bar; the free tier has not. After the issues are made, the command gives
+each epic what the free tier can show of it:
+
+- **A milestone per epic**, named like its issue (`Epic 4: Arbitration`), holding the issues of its stories. GitLab draws
+  the bar and the Milestones page reads like a list of epics. The milestone is closed when the epic is done and opened
+  again when it is not.
+- **A checklist in the issue of the epic** (`- [x] Story 4.1: … (#12)`, ticked for the stories that are done), so the
+  progress of the epic shows in the issue lists and on the board.
+
+Both are planned from what GitLab holds, so a second run changes nothing. A refusal of GitLab (a project without
+milestones) is a warning and the command still exits 0. A dry run names what it would do for the issues that exist;
+the ones it would create get theirs at the next run.
 
 ### Views by status
 

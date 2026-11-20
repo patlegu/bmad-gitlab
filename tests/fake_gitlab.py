@@ -30,6 +30,9 @@ class FakeGitLab:
     _boards_lists: dict[int, list[dict]] = field(default_factory=dict, init=False)
     _next_list_id: int = field(default=1, init=False)
 
+    _milestones: list[dict] = field(default_factory=list, init=False)
+    _next_milestone_id: int = field(default=1, init=False)
+
     _views: list[dict] = field(default_factory=list, init=False)
     _next_view_id: int = field(default=1, init=False)
     view_limit: int = field(default=5, init=False)  # GitLab shows five views per person
@@ -113,11 +116,44 @@ class FakeGitLab:
             return self._route_issues(method, params, stdin)
         if sub.startswith("issues/"):
             return self._route_issue_iid(method, sub, stdin)
+        if sub == "milestones":
+            return self._route_milestones(method, params, stdin)
+        if sub.startswith("milestones/"):
+            return (
+                self._put_milestone(int(sub.split("/")[1]), stdin) if method == "PUT" else self._not_found()
+            )
         if sub == "boards":
             return self._route_boards(method, stdin)
         if sub.startswith("boards/"):
             return self._route_board_lists(method, sub, stdin)
         return Reply(returncode=1, stdout='{"message":"404 Not Found"}', stderr="not found")
+
+    @staticmethod
+    def _not_found() -> Reply:
+        return Reply(returncode=1, stdout='{"message":"404 Not Found"}', stderr="not found")
+
+    def _route_milestones(self, method: str, params: dict, stdin: str | None) -> Reply:
+        if method == "GET":
+            per_page = int(params.get("per_page", 20))
+            start = (int(params.get("page", 1)) - 1) * per_page
+            return Reply(
+                returncode=0, stdout=json.dumps(self._milestones[start : start + per_page]), stderr=""
+            )
+        body = self._load_json(stdin)
+        if body is None or not body.get("title"):
+            return Reply(returncode=1, stdout='{"message":"400 Bad Request"}', stderr="bad request")
+        milestone = {"id": self._next_milestone_id, "title": body["title"], "state": "active"}
+        self._next_milestone_id += 1
+        self._milestones.append(milestone)
+        return Reply(returncode=0, stdout=json.dumps(milestone), stderr="")
+
+    def _put_milestone(self, milestone_id: int, stdin: str | None) -> Reply:
+        body = self._load_json(stdin)
+        for milestone in self._milestones:
+            if milestone["id"] == milestone_id and body is not None:
+                milestone["state"] = {"close": "closed", "activate": "active"}[body["state_event"]]
+                return Reply(returncode=0, stdout=json.dumps(milestone), stderr="")
+        return self._not_found()
 
     def _route_labels(self, method: str, params: dict, stdin: str | None) -> Reply:
         if method == "GET":
@@ -221,6 +257,7 @@ class FakeGitLab:
                 "description": body.get("description", ""),
                 "labels": sorted(body.get("labels", "").split(",")) if body.get("labels") else [],
                 "state": "opened",
+                "milestone": None,
             }
         )
         return Reply(returncode=0, stdout=json.dumps({"iid": iid}), stderr="")
@@ -256,6 +293,9 @@ class FakeGitLab:
         if "remove_labels" in body:
             to_remove = set(body["remove_labels"].split(","))
             issue["labels"] = [lbl for lbl in issue["labels"] if lbl not in to_remove]
+        if "milestone_id" in body:
+            found = next((m for m in self._milestones if m["id"] == body["milestone_id"]), None)
+            issue["milestone"] = None if found is None else {"id": found["id"], "title": found["title"]}
         if "state_event" in body:
             if body["state_event"] == "close":
                 issue["state"] = "closed"
